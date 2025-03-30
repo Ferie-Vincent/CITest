@@ -49,20 +49,41 @@ jobs:
         SSH_HOST: ${{ secrets.SSH_HOST }}
         SSH_USERNAME: ${{ secrets.SSH_USERNAME }}
       run: |
+        echo "🚀 Déploiement en cours..."
+
+        # Configurer la connexion SSH
         mkdir -p ~/.ssh
         echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
         ssh-keyscan -H $SSH_HOST >> ~/.ssh/known_hosts
-        
-        rsync -avz --delete --exclude='.git' --exclude='vendor' --exclude='.env' . $SSH_USERNAME@$SSH_HOST:/path/to/your/laravel/app
-        
+
+        # Tester la connexion SSH
+        ssh -v $SSH_USERNAME@$SSH_HOST "echo 'Connexion SSH réussie ✅'"
+
+        # Déploiement des fichiers avec rsync
+        echo "📂 Synchronisation des fichiers..."
+        rsync -avz --exclude='.git' --exclude='vendor' --exclude='.env' . $SSH_USERNAME@$SSH_HOST:/path/to/your/laravel/app || { echo "❌ Erreur Rsync"; exit 1; }
+
+        # Exécution des commandes sur le serveur
         ssh $SSH_USERNAME@$SSH_HOST << 'EOF'
+          set -e  # Arrête l'exécution en cas d'erreur
+          echo "📌 Déploiement sur le serveur..."
           cd /path/to/your/laravel/app
-          composer install --no-dev --prefer-dist --no-progress --no-interaction --optimize-autoloader
-          php artisan migrate --force
+
+          echo "📦 Installation des dépendances..."
+          composer install --no-dev --prefer-dist --no-progress --no-interaction --optimize-autoloader || { echo "❌ Erreur Composer"; exit 1; }
+
+          echo "🛠️ Exécution des migrations..."
+          php artisan migrate --force || { echo "❌ Erreur Migration"; exit 1; }
+
+          echo "⚙️ Mise en cache..."
           php artisan config:clear && php artisan config:cache
           php artisan route:clear && php artisan route:cache
           php artisan view:clear && php artisan view:cache
+
+          echo "🔐 Configuration des permissions..."
           chmod -R 775 storage bootstrap/cache
           chown -R www-data:www-data storage bootstrap/cache
+
+          echo "✅ Déploiement terminé avec succès !"
         EOF
