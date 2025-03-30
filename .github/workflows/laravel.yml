@@ -11,7 +11,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
 
     - name: Set up PHP
       uses: shivammathur/setup-php@v2
@@ -21,11 +21,21 @@ jobs:
         ini-values: post_max_size=512M, upload_max_filesize=512M, memory_limit=512M
         coverage: none
 
-    - name: Install Composer dependencies
-      run: composer install --prefer-dist --no-progress --no-suggest --no-interaction --optimize-autoloader
+    - name: Cache Composer dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.composer/cache
+        key: composer-${{ runner.os }}-${{ hashFiles('**/composer.lock') }}
+        restore-keys: composer-${{ runner.os }}-
 
-    - name: Copy .env.example to .env
-      run: cp .env.example .env
+    - name: Install Composer dependencies
+      run: composer install --prefer-dist --no-progress --no-interaction --optimize-autoloader
+
+    - name: Copy .env.example to .env if .env does not exist
+      run: |
+        if [ ! -f .env ]; then
+          cp .env.example .env
+        fi
 
     - name: Generate application key
       run: php artisan key:generate
@@ -42,6 +52,17 @@ jobs:
         mkdir -p ~/.ssh
         echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
-        ssh-keyscan $SSH_HOST >> ~/.ssh/known_hosts
-        rsync -avz --exclude='vendor' --exclude='.env' . $SSH_USERNAME@$SSH_HOST:/path/to/your/laravel/app
-        ssh $SSH_USERNAME@$SSH_HOST "cd /path/to/your/laravel/app && composer install --no-dev && php artisan migrate --force && php artisan config:cache && php artisan route:cache && php artisan view:cache"
+        ssh-keyscan -H $SSH_HOST >> ~/.ssh/known_hosts
+        
+        rsync -avz --delete --exclude='.git' --exclude='vendor' --exclude='.env' . $SSH_USERNAME@$SSH_HOST:/path/to/your/laravel/app
+        
+        ssh $SSH_USERNAME@$SSH_HOST << 'EOF'
+          cd /path/to/your/laravel/app
+          composer install --no-dev --prefer-dist --no-progress --no-interaction --optimize-autoloader
+          php artisan migrate --force
+          php artisan config:clear && php artisan config:cache
+          php artisan route:clear && php artisan route:cache
+          php artisan view:clear && php artisan view:cache
+          chmod -R 775 storage bootstrap/cache
+          chown -R www-data:www-data storage bootstrap/cache
+        EOF
